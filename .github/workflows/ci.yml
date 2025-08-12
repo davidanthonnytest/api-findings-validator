@@ -11,16 +11,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
       - name: Install dependencies
         run: |
-         pip install -r requirements.txt
-         pip install pytest-html
+          pip install -r requirements.txt
+          pip install pytest-html
 
       - name: Run pytest
         run: pytest -s --html=report.html --self-contained-html
@@ -31,11 +31,58 @@ jobs:
         with:
           name: pytest-report
           path: report.html
-      - name: Notify Slack
+
+      - name: Upload pytest report to Slack
         if: always()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
         run: |
-          STATUS="✅ Passed <!channel>"
-          if [ "${{ job.status }}" != "success" ]; then STATUS="❌ Failed"; fi
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"*API Findings Validator Tests*: ${STATUS}\nGitHub Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
-            ${{ secrets.SLACK_WEBHOOK_URL }}
+          set -euo pipefail
+          FILE="report.html"
+          if [ ! -f "$FILE" ]; then
+            echo "No $FILE found — skipping Slack upload."
+            exit 0
+          fi
+          LENGTH=$(wc -c < "$FILE" | tr -d ' ')
+          resp=$(curl -s -X POST "https://slack.com/api/files.getUploadURLExternal" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "filename=$(basename $FILE)" \
+            --data-urlencode "length=$LENGTH")
+          ok=$(echo "$resp" | python - <<PY
+import sys, json; r=json.load(sys.stdin); print(r.get("ok"))
+PY
+)
+          if [ "$ok" != "True" ] && [ "$ok" != "true" ]; then
+            echo "ERROR getting upload URL: $resp"
+            exit 1
+          fi
+          UPLOAD_URL=$(echo "$resp" | python - <<PY
+import sys, json; r=json.load(sys.stdin); print(r['upload_url'])
+PY
+)
+          FILE_ID=$(echo "$resp" | python - <<PY
+import sys, json; r=json.load(sys.stdin); print(r['file_id'])
+PY
+)
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$UPLOAD_URL" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$FILE")
+          if [ "$http_code" -ne 200 ]; then
+            echo "ERROR uploading to upload_url (HTTP $http_code)"
+            exit 1
+          fi
+          comp=$(curl -s -X POST "https://slack.com/api/files.completeUploadExternal" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"$(basename $FILE)\"}],\"channel_id\":\"$SLACK_CHANNEL_ID\",\"initial_comment\":\"<!channel> Hasil test: lihat report (attached).\"}")
+          ok2=$(echo "$comp" | python - <<PY
+import sys, json; r=json.load(sys.stdin); print(r.get("ok"))
+PY
+)
+          if [ "$ok2" != "True" ] && [ "$ok2" != "true" ]; then
+            echo "ERROR completing upload: $comp"
+            exit 1
+          fi
+          echo "Report uploaded and shared to Slack channel (file id: $FILE_ID)"
