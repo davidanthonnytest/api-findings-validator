@@ -34,7 +34,7 @@ jobs:
       - name: Notify Slack
         if: always()
         run: |
-          STATUS="✅ Passed @channel @here "
+          STATUS="✅ Passed <!channel>"
           if [ "${{ job.status }}" != "success" ]; then STATUS="❌ Failed"; fi
           curl -X POST -H 'Content-type: application/json' \
             --data "{\"text\":\"*API Findings Validator Tests*: ${STATUS}\nGitHub Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
