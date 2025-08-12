@@ -31,3 +31,11 @@ jobs:
         with:
           name: pytest-report
           path: report.html
+      - name: Notify Slack
+        if: always()
+        run: |
+          STATUS="✅ Passed"
+          if [ "${{ job.status }}" != "success" ]; then STATUS="❌ Failed"; fi
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"*API Findings Validator Tests*: ${STATUS}\nGitHub Actions run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            ${{ secrets.SLACK_WEBHOOK_URL }}
