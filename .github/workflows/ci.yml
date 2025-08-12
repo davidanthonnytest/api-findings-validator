@@ -50,39 +50,30 @@ jobs:
             -H "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode "filename=$(basename $FILE)" \
             --data-urlencode "length=$LENGTH")
-          ok=$(echo "$resp" | python - <<PY
-import sys, json; r=json.load(sys.stdin); print(r.get("ok"))
-PY
-)
+          ok=$(echo "$resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('ok', ''))")
           if [ "$ok" != "True" ] && [ "$ok" != "true" ]; then
             echo "ERROR getting upload URL: $resp"
             exit 1
           fi
-          UPLOAD_URL=$(echo "$resp" | python - <<PY
-import sys, json; r=json.load(sys.stdin); print(r['upload_url'])
-PY
-)
-          FILE_ID=$(echo "$resp" | python - <<PY
-import sys, json; r=json.load(sys.stdin); print(r['file_id'])
-PY
-)
-          http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$UPLOAD_URL" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @"$FILE")
+          
+          UPLOAD_URL=$(echo "$resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('upload_url', ''))")
+          
+          FILE_ID=$(echo "$resp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('file_id', ''))")
+          
+          http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$UPLOAD_URL" -H "Content-Type: application/octet-stream" --data-binary @"$FILE")
+          
           if [ "$http_code" -ne 200 ]; then
             echo "ERROR uploading to upload_url (HTTP $http_code)"
             exit 1
           fi
-          comp=$(curl -s -X POST "https://slack.com/api/files.completeUploadExternal" \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"$(basename $FILE)\"}],\"channel_id\":\"$SLACK_CHANNEL_ID\",\"initial_comment\":\"<!channel> Hasil test: lihat report (attached).\"}")
-          ok2=$(echo "$comp" | python - <<PY
-import sys, json; r=json.load(sys.stdin); print(r.get("ok"))
-PY
-)
+          
+          comp=$(curl -s -X POST "https://slack.com/api/files.completeUploadExternal" -H "Authorization: Bearer $SLACK_BOT_TOKEN" -H "Content-Type: application/json" -d "{\"files\":[{\"id\":\"$FILE_ID\",\"title\":\"$(basename $FILE)\"}],\"channel_id\":\"$SLACK_CHANNEL_ID\",\"initial_comment\":\"<!channel> Hasil test: lihat report (attached).\"}")
+          
+          ok2=$(echo "$comp" | python3 -c "import sys, json; r=json.load(sys.stdin); print(r.get('ok', ''))")
+          
           if [ "$ok2" != "True" ] && [ "$ok2" != "true" ]; then
             echo "ERROR completing upload: $comp"
             exit 1
           fi
+          
           echo "Report uploaded and shared to Slack channel (file id: $FILE_ID)"
